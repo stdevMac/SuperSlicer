@@ -1205,34 +1205,6 @@ static void init_multiextruders(FILE *file, Print &print, GCodeWriter & writer, 
                 int(print.config().temperature.get_at(tool_id)));
         }
     }
-    //activate first extruder is multi-extruder and not in start-gcode
-    if (writer.multiple_extruders) {
-        if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
-            //if not in gcode
-            bool find = false;
-            if (!custom_gcode.empty()) {
-                const char *ptr = custom_gcode.data();
-                while (*ptr != 0) {
-                    // Skip whitespaces.
-                    for (; *ptr == ' ' || *ptr == '\t'; ++ptr);
-                    if (*ptr == 'T') {
-                        find = true;
-                        break;
-                    } else if (*ptr == 'A') {
-                        //TODO: ACTIVATE_EXTRUDER for klipper (if used)
-                    }
-                    // Skip the rest of the line.
-                    for (; *ptr != 0 && *ptr != '\r' && *ptr != '\n'; ++ptr);
-                    // Skip the end of line indicators.
-                    for (; *ptr == '\r' || *ptr == '\n'; ++ptr);
-                }
-            }
-            if (!find) {
-                fprintf(file, writer.toolchange(tool_ordering.first_extruder()).c_str());
-            }
-        }
-        writer.toolchange(tool_ordering.first_extruder());
-    }
 }
 
 
@@ -1518,11 +1490,42 @@ void GCode::_do_export(Print &print, FILE *file)
     // Calculate wiping points if needed
     DoExport::init_ooze_prevention(print, m_ooze_prevention);
     print.throw_if_canceled();
-    
-    if (! (has_wipe_tower && print.config().single_extruder_multi_material_priming)) {
-        // Set initial extruder only after custom start G-code.
-        // Ugly hack: Do not set the initial extruder if the extruder is primed using the MMU priming towers at the edge of the print bed.
-        _write(file, this->set_extruder(initial_extruder_id, 0.));
+
+    //activate first extruder is multi-extruder and not in start-gcode
+    //if (! (has_wipe_tower && print.config().single_extruder_multi_material_priming)) {
+    if (m_writer.multiple_extruders) {
+        //if not in gcode
+        bool find = false;
+        if (!start_gcode.empty()) {
+            const char *ptr = start_gcode.data();
+            while (*ptr != 0) {
+                // Skip whitespaces.
+                for (; *ptr == ' ' || *ptr == '\t'; ++ptr);
+                if (*ptr == 'T') {
+                    // TX for most of the firmwares
+                    find = true;
+                    break;
+                } else if (*ptr == 'A' && print.config().gcode_flavor.value == gcfKlipper) {
+                    // ACTIVATE_EXTRUDER for klipper (if used)
+                    if (std::string::npos != start_gcode.find("ACTIVATE_EXTRUDER", size_t(ptr - start_gcode.data()))) {
+                        find = true;
+                        break;
+                    }
+                }
+                // Skip the rest of the line.
+                for (; *ptr != 0 && *ptr != '\r' && *ptr != '\n'; ++ptr);
+                // Skip the end of line indicators.
+                for (; *ptr == '\r' || *ptr == '\n'; ++ptr);
+            }
+        }
+        if (!find) {
+            // Set initial extruder only after custom start G-code.
+            // Ugly hack: Do not set the initial extruder if the extruder is primed using the MMU priming towers at the edge of the print bed.
+            _write(file, this->set_extruder(initial_extruder_id, 0.));
+        } else {
+            // set writer to the tool as should be set in the start_gcode.
+            m_writer.toolchange(initial_extruder_id);
+        }
     }
 
     // Do all objects for each layer.
